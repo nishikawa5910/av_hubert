@@ -71,6 +71,15 @@ class AVHubertAsrConfig(FairseqDataclass):
         },
     )
 
+    predict_audio_labels: bool = field(
+        default=False,
+        metadata={"help": "predict auxiliary audio labels from the encoder"},
+    )
+    audio_loss_weight: float = field(
+        default=1.0,
+        metadata={"help": "loss weight for auxiliary audio labels"},
+    )
+
     # masking
     apply_mask: bool = field(
         default=False, metadata={"help": "apply masking during fine-tuning"}
@@ -321,6 +330,8 @@ class HubertEncoder(FairseqEncoder):
         else:
             self.proj = None
 
+        self.encoder_output_dim = d if self.proj is None else self.proj.out_features
+
     def set_num_updates(self, num_updates):
         """Set the number of parameters updates."""
         super().set_num_updates(num_updates)
@@ -410,10 +421,22 @@ class HubertEncoderWrapper(FairseqEncoder):
 
 @register_model("av_hubert_seq2seq", dataclass=AVHubertSeq2SeqConfig)
 class AVHubertSeq2Seq(FairseqEncoderDecoderModel):
-    def __init__(self, encoder, decoder, tgt_dict, cfg):
+    def __init__(self, encoder, decoder, tgt_dict, cfg, audio_dictionary=None):
         super().__init__(encoder, decoder)
         self.cfg = cfg
         self.freeze_finetune_updates = cfg.freeze_finetune_updates
+        self.audio_dictionary = audio_dictionary
+        self.predict_audio_labels = cfg.predict_audio_labels and audio_dictionary is not None
+        self.audio_proj = None
+
+        if self.predict_audio_labels:
+            self.audio_proj = Linear(encoder.encoder_output_dim, len(audio_dictionary))
+
+    def _compute_audio_logits(self, encoder_out):
+        if not self.predict_audio_labels or self.audio_proj is None:
+            return None
+        audio_logits = self.audio_proj(encoder_out["encoder_out"])  # T x B x C
+        return audio_logits.transpose(0, 1)  # B x T x C
 
     @classmethod
     def build_model(cls, cfg, task):
@@ -477,6 +500,10 @@ class AVHubertSeq2Seq(FairseqEncoderDecoderModel):
         encoder.w2v_model.remove_pretraining_modules()
 
         src_dict, tgt_dict = task.source_dictionary, task.target_dictionary
+        dictionaries = getattr(task, "dictionaries", None)
+        audio_dictionary = None
+        if dictionaries is not None and len(dictionaries) > 1:
+            audio_dictionary = dictionaries[1]
 
         def build_embedding(dictionary, embed_dim):
             num_embeddings = len(dictionary)
@@ -487,7 +514,7 @@ class AVHubertSeq2Seq(FairseqEncoderDecoderModel):
         decoder_embed_tokens = build_embedding(tgt_dict, cfg.decoder_embed_dim)
         decoder = TransformerDecoder(cfg, tgt_dict, decoder_embed_tokens)
 
-        return AVHubertSeq2Seq(encoder, decoder, tgt_dict, cfg)
+        return AVHubertSeq2Seq(encoder, decoder, tgt_dict, cfg, audio_dictionary)
 
 
     def forward(self, **kwargs):
@@ -495,6 +522,17 @@ class AVHubertSeq2Seq(FairseqEncoderDecoderModel):
         with torch.no_grad() if not ft else contextlib.ExitStack():
             output = self.encoder(**kwargs)
         decoder_out = self.decoder(prev_output_tokens=kwargs['prev_output_tokens'], encoder_out=output)
+
+        if self.predict_audio_labels:
+            audio_logits = self._compute_audio_logits(output)
+            if isinstance(decoder_out, tuple):
+                if len(decoder_out) > 1 and isinstance(decoder_out[1], dict):
+                    decoder_out[1]["audio_logits"] = audio_logits
+                    decoder_out[1]["audio_padding_mask"] = output.get("encoder_padding_mask")
+                else:
+                    decoder_out = (decoder_out[0], {"audio_logits": audio_logits, "audio_padding_mask": output.get("encoder_padding_mask")})
+            else:
+                decoder_out = (decoder_out, {"audio_logits": audio_logits, "audio_padding_mask": output.get("encoder_padding_mask")})
         return decoder_out
 
     def upgrade_state_dict_named(self, state_dict, name):

@@ -190,7 +190,8 @@ class AVHubertDataset(FairseqDataset):
         self.is_s2s = is_s2s
         self.noise_wav, self.noise_prob, self.noise_snr, self.noise_num = [ln.strip() for ln in open(noise_fn).readlines()] if noise_fn is not None else [], noise_prob, noise_snr, noise_num
 
-        assert self.single_target == (self.label_rates[0] == -1), f"single target should be equivalent to sequence label (label_rate==-1)"
+        if self.num_labels == 1:
+            assert self.single_target == (self.label_rates[0] == -1), f"single target should be equivalent to sequence label (label_rate==-1)"
         if store_labels:
             self.label_list = [load_label(p, inds, tot) for p in label_paths]
         else:
@@ -425,6 +426,17 @@ class AVHubertDataset(FairseqDataset):
             batch["target_lengths_list"] = lengths_list
             batch["ntokens_list"] = ntokens_list
             batch["target_list"] = targets_list
+
+            if self.is_s2s and self.label_rates[0] == -1:
+                batch["target_lengths"] = lengths_list[0]
+                batch["ntokens"] = ntokens_list[0]
+                batch['target'], net_input['prev_output_tokens'] = targets_list[0][0], targets_list[0][1]
+
+            if self.num_labels > 1:
+                # Expose auxiliary labels (e.g., audio clustering units) separately
+                batch["audio_targets"] = targets_list[1]
+                batch["audio_target_lengths"] = lengths_list[1]
+                batch["audio_ntokens"] = ntokens_list[1]
         return batch
 
     def collater_audio(self, audios, audio_size, audio_starts=None):
