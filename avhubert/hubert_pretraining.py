@@ -7,7 +7,7 @@
 import logging
 import os, glob
 import sys
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
 
@@ -79,7 +79,7 @@ class AVHubertPretrainingConfig(FairseqDataclass):
             "help": "if set, looks for labels in this directory instead",
         },
     )
-    label_rate: int = field(
+    label_rate: Union[int, List[int]] = field(
         default=-1,
         metadata={"help": "label frame rate. -1 for sequence label"},
     )
@@ -172,12 +172,11 @@ class AVHubertPretrainingTask(FairseqTask):
         logger.info(f"AVHubertPretrainingTask Config {cfg}")
 
         self.fine_tuning = cfg.fine_tuning
+        self.state.add_factory("dictionaries", self.load_dictionaries)
         if cfg.fine_tuning:
-            self.state.add_factory("target_dictionary", self.load_dictionaries)
+            self.state.add_factory("target_dictionary", self.get_primary_dictionary)
             if cfg.is_s2s:
                 self.state.add_factory("s2s_tokenizer", self.load_tokenizer)
-        else:
-            self.state.add_factory("dictionaries", self.load_dictionaries)
 
         self.blank_symbol = "<s>"
 
@@ -199,7 +198,11 @@ class AVHubertPretrainingTask(FairseqTask):
             Dictionary.load(f"{label_dir}/dict.{label}.txt")
             for label in self.cfg.labels
         ]
-        return dictionaries[0] if self.cfg.fine_tuning else dictionaries
+        return dictionaries
+
+    def get_primary_dictionary(self):
+        dictionaries = self.dictionaries
+        return dictionaries[0]
 
     def load_tokenizer(self):
         bpe_args = Namespace(**{'bpe': self.cfg.tokenizer_bpe_name, f"{self.cfg.tokenizer_bpe_name}_model": self.cfg.tokenizer_bpe_model})
@@ -226,7 +229,7 @@ class AVHubertPretrainingTask(FairseqTask):
 
     def load_dataset(self, split: str, **kwargs) -> None:
         manifest = f"{self.cfg.data}/{split}.tsv"
-        dictionaries = [self.target_dictionary] if self.fine_tuning else self.dictionaries
+        dictionaries = self.dictionaries
         pad_list = [dictionary.pad() for dictionary in dictionaries]
         eos_list = [dictionary.eos() for dictionary in dictionaries]
         if not self.cfg.is_s2s:
@@ -234,7 +237,8 @@ class AVHubertPretrainingTask(FairseqTask):
         else:
             logger.info(f"Using tokenizer")
             bpe_tokenizer = self.s2s_tokenizer
-            procs = [LabelEncoderS2SToken(dictionary, bpe_tokenizer) for dictionary in dictionaries]
+            procs = [LabelEncoderS2SToken(dictionaries[0], bpe_tokenizer)]
+            procs += [LabelEncoder(dictionary) for dictionary in dictionaries[1:]]
         paths = [
             f"{self.get_label_dir()}/{split}.{l}" for l in self.cfg.labels
         ]
