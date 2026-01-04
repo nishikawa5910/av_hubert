@@ -311,12 +311,20 @@ class HubertEncoder(FairseqEncoder):
         w2v_args.task.data = cfg.data
         if cfg.skip_w2v_label_dicts:
             with open_dict(w2v_args.task) if OmegaConf.is_struct(w2v_args.task) else contextlib.nullcontext():
-                if OmegaConf.select(w2v_args, "task.labels") is not None:
+                task_labels = (
+                    w2v_args.task.get("labels", None)
+                    if hasattr(w2v_args.task, "get")
+                    else None
+                )
+                if task_labels is not None:
                     w2v_args.task.labels = []
-                if OmegaConf.select(w2v_args, "task.label_types") is not None:
+                task_label_types = (
+                    w2v_args.task.get("label_types", None)
+                    if hasattr(w2v_args.task, "get")
+                    else None
+                )
+                if task_label_types is not None:
                     w2v_args.task.label_types = []
-            w2v_args.task.labels = []
-            w2v_args.task.label_types = []
 
         task = tasks.setup_task(w2v_args.task)
         model = task.build_model(w2v_args.model)
