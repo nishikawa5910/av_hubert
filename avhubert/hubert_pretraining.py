@@ -222,7 +222,13 @@ class AVHubertPretrainingTask(FairseqTask):
 
     def load_dictionaries(self):
         label_dir = self.cfg.data if self.cfg.label_dir is None else self.cfg.label_dir
-        label_types = self.cfg.label_types or ["class" for _ in self.cfg.labels]
+        label_types = (
+            list(self.cfg.label_types) if self.cfg.label_types is not None else None
+        )
+        if not label_types:
+            label_types = ["class" for _ in self.cfg.labels]
+        if len(label_types) == 1 and len(self.cfg.labels) > 1:
+            label_types = label_types * len(self.cfg.labels)
         dictionaries = []
         for label, label_type in zip(self.cfg.labels, label_types):
             if label_type == "float":
@@ -264,7 +270,13 @@ class AVHubertPretrainingTask(FairseqTask):
     def load_dataset(self, split: str, **kwargs) -> None:
         manifest = f"{self.cfg.data}/{split}.tsv"
         dictionaries = self.dictionaries
-        label_types = self.cfg.label_types or ["class" for _ in self.cfg.labels]
+        label_types = (
+            list(self.cfg.label_types) if self.cfg.label_types is not None else None
+        )
+        if not label_types:
+            label_types = ["class" for _ in self.cfg.labels]
+        if len(label_types) == 1 and len(self.cfg.labels) > 1:
+            label_types = label_types * len(self.cfg.labels)
         pad_list = []
         eos_list = []
         for dictionary, label_type in zip(dictionaries, label_types):
