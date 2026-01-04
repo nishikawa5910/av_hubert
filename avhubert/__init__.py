@@ -5,7 +5,9 @@
 
 from .hubert import *  # noqa
 from .hubert_asr import *  # noqa
+from .hubert_contentvec import *  # noqa
 from .hubert_dataset import *
 from .hubert_pretraining import *
 from .hubert_criterion import *
 from .audio_aux_criterion import *
+from .contentvec_criterion import *

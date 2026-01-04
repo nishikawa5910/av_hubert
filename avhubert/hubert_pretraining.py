@@ -7,9 +7,10 @@
 import logging
 import os, glob
 import sys
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
+import torch
 
 from dataclasses import dataclass, field
 from fairseq import metrics, search
@@ -42,6 +43,23 @@ class LabelEncoder(object):
             label, append_eos=False, add_if_not_exist=False,
         )
 
+class LabelEncoderFloat(object):
+    def __init__(self, label_root: Optional[str] = None) -> None:
+        self.label_root = label_root
+
+    def __call__(self, label: str):
+        label = label.strip().split()[0]
+        if self.label_root is not None and not os.path.isabs(label):
+            label = os.path.join(self.label_root, label)
+        if label.endswith(".pt"):
+            feats = torch.load(label)
+            if isinstance(feats, np.ndarray):
+                feats = torch.from_numpy(feats)
+        else:
+            feats = np.load(label)
+            feats = torch.from_numpy(feats)
+        return feats.float()
+
 class LabelEncoderS2SToken(object):
     def __init__(self, dictionary: Dictionary, bpe_tokenizer) -> None:
         self.bpe_tokenizer = bpe_tokenizer
@@ -73,13 +91,23 @@ class AVHubertPretrainingConfig(FairseqDataclass):
             )
         },
     )
+    label_types: Optional[List[str]] = field(
+        default=None,
+        metadata={
+            "help": "label types per label file: class or float",
+        },
+    )
+    float_pad_value: float = field(
+        default=0.0,
+        metadata={"help": "pad value for float labels"},
+    )
     label_dir: Optional[str] = field(
         default=None,
         metadata={
             "help": "if set, looks for labels in this directory instead",
         },
     )
-    label_rate: Union[int, List[int]] = field(
+    label_rate: Any = field(
         default=-1,
         metadata={"help": "label frame rate. -1 for sequence label"},
     )
@@ -194,15 +222,27 @@ class AVHubertPretrainingTask(FairseqTask):
 
     def load_dictionaries(self):
         label_dir = self.cfg.data if self.cfg.label_dir is None else self.cfg.label_dir
-        dictionaries = [
-            Dictionary.load(f"{label_dir}/dict.{label}.txt")
-            for label in self.cfg.labels
-        ]
+        label_types = (
+            list(self.cfg.label_types) if self.cfg.label_types is not None else None
+        )
+        if not label_types:
+            label_types = ["class" for _ in self.cfg.labels]
+        if len(label_types) == 1 and len(self.cfg.labels) > 1:
+            label_types = label_types * len(self.cfg.labels)
+        dictionaries = []
+        for label, label_type in zip(self.cfg.labels, label_types):
+            if label_type == "float":
+                dictionaries.append(None)
+            else:
+                dictionaries.append(Dictionary.load(f"{label_dir}/dict.{label}.txt"))
         return dictionaries
 
     def get_primary_dictionary(self):
         dictionaries = self.dictionaries
-        return dictionaries[0]
+        for dictionary in dictionaries:
+            if dictionary is not None:
+                return dictionary
+        return None
 
     def load_tokenizer(self):
         bpe_args = Namespace(**{'bpe': self.cfg.tokenizer_bpe_name, f"{self.cfg.tokenizer_bpe_name}_model": self.cfg.tokenizer_bpe_model})
@@ -230,15 +270,40 @@ class AVHubertPretrainingTask(FairseqTask):
     def load_dataset(self, split: str, **kwargs) -> None:
         manifest = f"{self.cfg.data}/{split}.tsv"
         dictionaries = self.dictionaries
-        pad_list = [dictionary.pad() for dictionary in dictionaries]
-        eos_list = [dictionary.eos() for dictionary in dictionaries]
+        label_types = (
+            list(self.cfg.label_types) if self.cfg.label_types is not None else None
+        )
+        if not label_types:
+            label_types = ["class" for _ in self.cfg.labels]
+        if len(label_types) == 1 and len(self.cfg.labels) > 1:
+            label_types = label_types * len(self.cfg.labels)
+        pad_list = []
+        eos_list = []
+        for dictionary, label_type in zip(dictionaries, label_types):
+            if label_type == "float":
+                pad_list.append(self.cfg.float_pad_value)
+                eos_list.append(None)
+            else:
+                pad_list.append(dictionary.pad())
+                eos_list.append(dictionary.eos())
         if not self.cfg.is_s2s:
-            procs = [LabelEncoder(dictionary) for dictionary in dictionaries]
+            procs = []
+            for dictionary, label_type in zip(dictionaries, label_types):
+                if label_type == "float":
+                    procs.append(LabelEncoderFloat(self.get_label_dir()))
+                else:
+                    procs.append(LabelEncoder(dictionary))
         else:
             logger.info(f"Using tokenizer")
             bpe_tokenizer = self.s2s_tokenizer
+            if label_types[0] != "class":
+                raise ValueError("Sequence-to-sequence targets require class labels.")
             procs = [LabelEncoderS2SToken(dictionaries[0], bpe_tokenizer)]
-            procs += [LabelEncoder(dictionary) for dictionary in dictionaries[1:]]
+            for dictionary, label_type in zip(dictionaries[1:], label_types[1:]):
+                if label_type == "float":
+                    procs.append(LabelEncoderFloat(self.get_label_dir()))
+                else:
+                    procs.append(LabelEncoder(dictionary))
         paths = [
             f"{self.get_label_dir()}/{split}.{l}" for l in self.cfg.labels
         ]
@@ -269,6 +334,7 @@ class AVHubertPretrainingTask(FairseqTask):
             image_aug=image_aug,
             modalities=self.cfg.modalities,
             is_s2s=self.cfg.is_s2s,
+            label_types=label_types,
             noise_fn=noise_fn,
             noise_prob=self.cfg.noise_prob,
             noise_snr=noise_snr,
