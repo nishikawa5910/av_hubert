@@ -73,7 +73,6 @@ lr_scheduler:
 model:
   _name: av_hubert_contentvec
   w2v_path: ???
-  skip_w2v_label_dicts: true
   apply_mask: false
   mask_selection: static
   mask_length: 10
