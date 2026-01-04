@@ -315,6 +315,8 @@ class HubertEncoder(FairseqEncoder):
                     w2v_args.task.labels = []
                 if OmegaConf.select(w2v_args, "task.label_types") is not None:
                     w2v_args.task.label_types = []
+            w2v_args.task.labels = []
+            w2v_args.task.label_types = []
 
         task = tasks.setup_task(w2v_args.task)
         model = task.build_model(w2v_args.model)
