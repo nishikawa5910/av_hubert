@@ -7,7 +7,7 @@
 import logging
 import os, glob
 import sys
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import torch
@@ -107,7 +107,7 @@ class AVHubertPretrainingConfig(FairseqDataclass):
             "help": "if set, looks for labels in this directory instead",
         },
     )
-    label_rate: Union[int, List[int]] = field(
+    label_rate: Any = field(
         default=-1,
         metadata={"help": "label frame rate. -1 for sequence label"},
     )
