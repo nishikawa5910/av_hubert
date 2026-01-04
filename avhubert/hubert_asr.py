@@ -331,7 +331,11 @@ class HubertEncoder(FairseqEncoder):
 
         if state is not None and not cfg.no_pretrained_weights:
             # set strict=False because we omit some modules
-            model.load_state_dict(state["model"], strict=False)
+            state_dict = state["model"]
+            if cfg.skip_w2v_label_dicts:
+                for key in ("label_embs_concat", "final_proj.weight", "final_proj.bias"):
+                    state_dict.pop(key, None)
+            model.load_state_dict(state_dict, strict=False)
 
         model.remove_pretraining_modules()
 
