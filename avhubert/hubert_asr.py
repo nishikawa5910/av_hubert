@@ -19,7 +19,7 @@ from fairseq.dataclass.utils import convert_namespace_to_omegaconf
 from fairseq.models import BaseFairseqModel, FairseqEncoder, FairseqEncoderDecoderModel, register_model
 from fairseq.models.hubert.hubert import MASKING_DISTRIBUTION_CHOICES
 from fairseq.tasks import FairseqTask
-from omegaconf import II, MISSING
+from omegaconf import II, MISSING, OmegaConf, open_dict
 
 DBG=True if len(sys.argv) == 1 else False
 
@@ -145,6 +145,12 @@ class AVHubertAsrConfig(FairseqDataclass):
     layerdrop: float = field(
         default=0.0,
         metadata={"help": "probability of dropping a layer in hubert"},
+    )
+    skip_w2v_label_dicts: bool = field(
+        default=False,
+        metadata={
+            "help": "skip loading pretraining label dictionaries from w2v_args"
+        },
     )
     normalize: bool = II("task.normalize")
     data: str = II("task.data")
@@ -303,6 +309,22 @@ class HubertEncoder(FairseqEncoder):
         )
 
         w2v_args.task.data = cfg.data
+        if cfg.skip_w2v_label_dicts:
+            with open_dict(w2v_args.task) if OmegaConf.is_struct(w2v_args.task) else contextlib.nullcontext():
+                task_labels = (
+                    w2v_args.task.get("labels", None)
+                    if hasattr(w2v_args.task, "get")
+                    else None
+                )
+                if task_labels is not None:
+                    w2v_args.task.labels = []
+                task_label_types = (
+                    w2v_args.task.get("label_types", None)
+                    if hasattr(w2v_args.task, "get")
+                    else None
+                )
+                if task_label_types is not None:
+                    w2v_args.task.label_types = []
 
         task = tasks.setup_task(w2v_args.task)
         model = task.build_model(w2v_args.model)
