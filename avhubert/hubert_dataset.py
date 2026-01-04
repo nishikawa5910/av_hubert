@@ -198,7 +198,6 @@ class AVHubertDataset(FairseqDataset):
         self.num_labels = len(label_paths)
         self.pad_list = pad_list
         self.eos_list = eos_list
-        self.label_processors = label_processors
         self.single_target = single_target
         self.store_labels = store_labels
         self.is_s2s = is_s2s
@@ -216,10 +215,15 @@ class AVHubertDataset(FairseqDataset):
             self.label_offsets_list = [
                 load_label_offset(p, inds, tot) for p in label_paths
             ]
-        assert (
-            label_processors is None
-            or len(label_processors) == self.num_labels
-        )
+        if label_processors is not None and len(label_processors) != self.num_labels:
+            if len(label_processors) == 1:
+                label_processors = label_processors * self.num_labels
+            else:
+                raise ValueError(
+                    "label_processors length mismatch: "
+                    f"{len(label_processors)} vs labels {self.num_labels}"
+                )
+        self.label_processors = label_processors
         if not skip_verify:
             for label_path, label_rate, label_type in zip(label_paths, self.label_rates, self.label_types):
                 verify_label_lengths(self.sizes, self.sample_rate, label_path, label_rate, label_type, inds, tot)
