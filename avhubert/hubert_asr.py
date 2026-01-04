@@ -146,6 +146,12 @@ class AVHubertAsrConfig(FairseqDataclass):
         default=0.0,
         metadata={"help": "probability of dropping a layer in hubert"},
     )
+    skip_w2v_label_dicts: bool = field(
+        default=False,
+        metadata={
+            "help": "skip loading pretraining label dictionaries from w2v_args"
+        },
+    )
     normalize: bool = II("task.normalize")
     data: str = II("task.data")
 
@@ -303,6 +309,9 @@ class HubertEncoder(FairseqEncoder):
         )
 
         w2v_args.task.data = cfg.data
+        if cfg.skip_w2v_label_dicts:
+            w2v_args.task.labels = []
+            w2v_args.task.label_types = []
 
         task = tasks.setup_task(w2v_args.task)
         model = task.build_model(w2v_args.model)
