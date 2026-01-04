@@ -205,7 +205,10 @@ class AVHubertDataset(FairseqDataset):
         self.noise_wav, self.noise_prob, self.noise_snr, self.noise_num = [ln.strip() for ln in open(noise_fn).readlines()] if noise_fn is not None else [], noise_prob, noise_snr, noise_num
 
         if self.num_labels == 1:
-            assert self.single_target == (self.label_rates[0] == -1), f"single target should be equivalent to sequence label (label_rate==-1)"
+            if self.label_types[0] == "class":
+                assert self.single_target == (self.label_rates[0] == -1), (
+                    "single target should be equivalent to sequence label (label_rate==-1)"
+                )
         if store_labels:
             self.label_list = [load_label(p, inds, tot) for p in label_paths]
         else:
