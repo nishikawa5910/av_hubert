@@ -279,30 +279,49 @@ class AVHubertPretrainingTask(FairseqTask):
             label_types = label_types * len(self.cfg.labels)
         pad_list = []
         eos_list = []
-        for dictionary, label_type in zip(dictionaries, label_types):
+        for idx, label_type in enumerate(label_types):
+            dictionary = dictionaries[idx] if idx < len(dictionaries) else None
             if label_type == "float":
                 pad_list.append(self.cfg.float_pad_value)
                 eos_list.append(None)
             else:
+                if dictionary is None:
+                    raise ValueError(
+                        f"Missing dictionary for label {self.cfg.labels[idx]}"
+                    )
                 pad_list.append(dictionary.pad())
                 eos_list.append(dictionary.eos())
         if not self.cfg.is_s2s:
             procs = []
-            for dictionary, label_type in zip(dictionaries, label_types):
+            for idx, label_type in enumerate(label_types):
+                dictionary = dictionaries[idx] if idx < len(dictionaries) else None
                 if label_type == "float":
                     procs.append(LabelEncoderFloat(self.get_label_dir()))
                 else:
+                    if dictionary is None:
+                        raise ValueError(
+                            f"Missing dictionary for label {self.cfg.labels[idx]}"
+                        )
                     procs.append(LabelEncoder(dictionary))
         else:
             logger.info(f"Using tokenizer")
             bpe_tokenizer = self.s2s_tokenizer
             if label_types[0] != "class":
                 raise ValueError("Sequence-to-sequence targets require class labels.")
+            if dictionaries[0] is None:
+                raise ValueError(
+                    f"Missing dictionary for label {self.cfg.labels[0]}"
+                )
             procs = [LabelEncoderS2SToken(dictionaries[0], bpe_tokenizer)]
-            for dictionary, label_type in zip(dictionaries[1:], label_types[1:]):
+            for idx, label_type in enumerate(label_types[1:], start=1):
+                dictionary = dictionaries[idx] if idx < len(dictionaries) else None
                 if label_type == "float":
                     procs.append(LabelEncoderFloat(self.get_label_dir()))
                 else:
+                    if dictionary is None:
+                        raise ValueError(
+                            f"Missing dictionary for label {self.cfg.labels[idx]}"
+                        )
                     procs.append(LabelEncoder(dictionary))
         paths = [
             f"{self.get_label_dir()}/{split}.{l}" for l in self.cfg.labels
