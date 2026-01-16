@@ -36,18 +36,21 @@ else:
 logger = logging.getLogger(__name__)
 
 
-def load_audio_visual(manifest_path, max_keep, min_keep, frame_rate, label_paths, label_rates, tol=0.1):
+def load_audio_visual(manifest_path, max_keep, min_keep, frame_rate, label_paths, label_rates, label_types=None, tol=0.1):
     def is_audio_label_aligned(audio_dur, label_durs):
         return all([abs(audio_dur - label_dur)<tol for label_dur in label_durs])
 
     n_long, n_short, n_unaligned = 0, 0, 0
     names, inds, sizes = [], [], []
     dur_from_label_list = []
-    is_seq_label = any([x==-1 for x in label_rates])
-    for label_path, label_rate in zip(label_paths, label_rates):
+    label_types = label_types or ["class" for _ in label_paths]
+    for label_path, label_rate, label_type in zip(label_paths, label_rates, label_types):
+        if label_rate == -1 or label_type == "float":
+            continue
         label_lengths = [len(line.rstrip().split())/label_rate for line in open(label_path).readlines()]
         dur_from_label_list.append(label_lengths)
-    dur_from_label_list = list(zip(*dur_from_label_list))
+    dur_from_label_list = list(zip(*dur_from_label_list)) if dur_from_label_list else []
+    use_alignment = len(dur_from_label_list) > 0
 
     with open(manifest_path) as f:
         root = f.readline().strip()
@@ -58,7 +61,7 @@ def load_audio_visual(manifest_path, max_keep, min_keep, frame_rate, label_paths
                 n_short += 1
             elif max_keep is not None and sz > max_keep:
                 n_long += 1
-            elif (not is_seq_label) and (not is_audio_label_aligned(sz/frame_rate, dur_from_label_list[ind])):
+            elif use_alignment and (not is_audio_label_aligned(sz/frame_rate, dur_from_label_list[ind])):
                 n_unaligned += 1
             else:
                 video_path = items[1]
@@ -103,12 +106,13 @@ def verify_label_lengths(
     audio_rate,
     label_path,
     label_rate,
+    label_type,
     inds,
     tot,
     tol=0.1,  # tolerance in seconds
 ):
-    if label_rate < 0:
-        logger.info(f"{label_path} is sequence label. skipped")
+    if label_rate < 0 or label_type == "float":
+        logger.info(f"{label_path} is sequence/float label. skipped")
         return
 
     with open(label_path) as f:
@@ -147,6 +151,7 @@ class AVHubertDataset(FairseqDataset):
             pad_list: List[str],
             eos_list: List[str],
             label_processors: Optional[List[Any]] = None,
+            label_types: Optional[List[str]] = None,
             max_keep_sample_size: Optional[int] = None,
             min_keep_sample_size: Optional[int] = None,
             max_sample_size: Optional[int] = None,
@@ -175,7 +180,16 @@ class AVHubertDataset(FairseqDataset):
             else label_rates
         )
         self.modalities = set(modalities)
-        self.audio_root, self.names, inds, tot, self.sizes = load_audio_visual(manifest_path, max_keep_sample_size, min_keep_sample_size, frame_rate=sample_rate, label_paths=label_paths, label_rates=self.label_rates)
+        self.label_types = label_types or ["class" for _ in label_paths]
+        self.audio_root, self.names, inds, tot, self.sizes = load_audio_visual(
+            manifest_path,
+            max_keep_sample_size,
+            min_keep_sample_size,
+            frame_rate=sample_rate,
+            label_paths=label_paths,
+            label_rates=self.label_rates,
+            label_types=self.label_types,
+        )
         self.sample_rate = sample_rate
         self.stack_order_audio = stack_order_audio
         self.shuffle = shuffle
@@ -184,14 +198,16 @@ class AVHubertDataset(FairseqDataset):
         self.num_labels = len(label_paths)
         self.pad_list = pad_list
         self.eos_list = eos_list
-        self.label_processors = label_processors
         self.single_target = single_target
         self.store_labels = store_labels
         self.is_s2s = is_s2s
         self.noise_wav, self.noise_prob, self.noise_snr, self.noise_num = [ln.strip() for ln in open(noise_fn).readlines()] if noise_fn is not None else [], noise_prob, noise_snr, noise_num
 
         if self.num_labels == 1:
-            assert self.single_target == (self.label_rates[0] == -1), f"single target should be equivalent to sequence label (label_rate==-1)"
+            if self.label_types[0] == "class":
+                assert self.single_target == (self.label_rates[0] == -1), (
+                    "single target should be equivalent to sequence label (label_rate==-1)"
+                )
         if store_labels:
             self.label_list = [load_label(p, inds, tot) for p in label_paths]
         else:
@@ -199,13 +215,18 @@ class AVHubertDataset(FairseqDataset):
             self.label_offsets_list = [
                 load_label_offset(p, inds, tot) for p in label_paths
             ]
-        assert (
-            label_processors is None
-            or len(label_processors) == self.num_labels
-        )
+        if label_processors is not None and len(label_processors) != self.num_labels:
+            if len(label_processors) == 1:
+                label_processors = label_processors * self.num_labels
+            else:
+                raise ValueError(
+                    "label_processors length mismatch: "
+                    f"{len(label_processors)} vs labels {self.num_labels}"
+                )
+        self.label_processors = label_processors
         if not skip_verify:
-            for label_path, label_rate in zip(label_paths, self.label_rates):
-                verify_label_lengths(self.sizes, self.sample_rate, label_path, label_rate, inds, tot)
+            for label_path, label_rate, label_type in zip(label_paths, self.label_rates, self.label_types):
+                verify_label_lengths(self.sizes, self.sample_rate, label_path, label_rate, label_type, inds, tot)
         else:
             logger.info(f"Skip label alignment verifying")
 
@@ -489,6 +510,28 @@ class AVHubertDataset(FairseqDataset):
         )
         return targets, lengths, ntokens
 
+    def collater_frm_float_label(
+        self, targets, audio_size, audio_starts, label_rate, pad
+    ):
+        assert label_rate > 0
+        s2f = label_rate / self.sample_rate
+        frm_starts = [int(round(s * s2f)) for s in audio_starts]
+        frm_size = int(round(audio_size * s2f))
+        if not self.pad_audio:
+            rem_size = [len(t) - s for t, s in zip(targets, frm_starts)]
+            frm_size = min(frm_size, *rem_size)
+        targets = [t[s: s + frm_size] for t, s in zip(targets, frm_starts)]
+        lengths = torch.LongTensor([len(t) for t in targets])
+        ntokens = lengths.sum().item()
+        feat_dim = targets[0].shape[-1]
+        collated = targets[0].new_full(
+            (len(targets), frm_size, feat_dim),
+            float(pad),
+        )
+        for i, tgt in enumerate(targets):
+            collated[i, : tgt.shape[0]] = tgt
+        return collated, lengths, ntokens
+
     def collater_seq_label(self, targets, pad):
         lengths = torch.LongTensor([len(t) for t in targets])
         ntokens = lengths.sum().item()
@@ -507,13 +550,17 @@ class AVHubertDataset(FairseqDataset):
 
     def collater_label(self, targets_by_label, audio_size, audio_starts):
         targets_list, lengths_list, ntokens_list = [], [], []
-        itr = zip(targets_by_label, self.label_rates, self.pad_list)
-        for targets, label_rate, pad in itr:
+        itr = zip(targets_by_label, self.label_rates, self.pad_list, self.label_types)
+        for targets, label_rate, pad, label_type in itr:
             if label_rate == -1:
                 if self.is_s2s:
                     targets, lengths, ntokens = self.collater_seq_label_s2s(targets, pad)
                 else:
                     targets, lengths, ntokens = self.collater_seq_label(targets, pad)
+            elif label_type == "float":
+                targets, lengths, ntokens = self.collater_frm_float_label(
+                    targets, audio_size, audio_starts, label_rate, pad
+                )
             else:
                 targets, lengths, ntokens = self.collater_frm_label(
                     targets, audio_size, audio_starts, label_rate, pad
