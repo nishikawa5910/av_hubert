@@ -71,6 +71,11 @@ def load_audio_visual(manifest_path, max_keep, min_keep, frame_rate, label_paths
                 inds.append(ind)
                 sizes.append(sz)
     tot = ind + 1
+    if not sizes:
+        raise ValueError(
+            "No samples matched filtering constraints. "
+            "Check max_keep/min_keep and label alignment settings."
+        )
     logger.info(
         (
             f"max_keep={max_keep}, min_keep={min_keep}, "
@@ -495,9 +500,8 @@ class AVHubertDataset(FairseqDataset):
         s2f = label_rate / self.sample_rate # num label per sample
         frm_starts = [int(round(s * s2f)) for s in audio_starts]
         frm_size = int(round(audio_size * s2f))
-        if not self.pad_audio:
-            rem_size = [len(t) - s for t, s in zip(targets, frm_starts)]
-            frm_size = min(frm_size, *rem_size)
+        rem_size = [len(t) - s for t, s in zip(targets, frm_starts)]
+        frm_size = min(frm_size, *rem_size)
         targets = [t[s: s + frm_size] for t, s in zip(targets, frm_starts)]
         logger.debug(f"audio_starts={audio_starts}")
         logger.debug(f"frame_starts={frm_starts}")
@@ -517,9 +521,8 @@ class AVHubertDataset(FairseqDataset):
         s2f = label_rate / self.sample_rate
         frm_starts = [int(round(s * s2f)) for s in audio_starts]
         frm_size = int(round(audio_size * s2f))
-        if not self.pad_audio:
-            rem_size = [len(t) - s for t, s in zip(targets, frm_starts)]
-            frm_size = min(frm_size, *rem_size)
+        rem_size = [len(t) - s for t, s in zip(targets, frm_starts)]
+        frm_size = min(frm_size, *rem_size)
         targets = [t[s: s + frm_size] for t, s in zip(targets, frm_starts)]
         lengths = torch.LongTensor([len(t) for t in targets])
         ntokens = lengths.sum().item()

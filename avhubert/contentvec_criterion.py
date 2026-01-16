@@ -84,7 +84,10 @@ class ContentVecCrossEntropyCriterion(FairseqCriterion):
     def forward(self, model, sample, reduce=True):
         net_output = model(**sample["net_input"])
         pred = net_output["pred"]  # T x B x C
-        target = sample["target"]  # B x T
+        if "target" in sample:
+            target = sample["target"]  # B x T
+        else:
+            target = sample["target_list"][0]  # B x T
         target = target.transpose(0, 1)
 
         pred = pred.transpose(0, 1).contiguous().view(-1, pred.size(-1))
@@ -93,8 +96,18 @@ class ContentVecCrossEntropyCriterion(FairseqCriterion):
         padding_mask: Optional[torch.Tensor] = net_output.get("padding_mask")
         if padding_mask is not None:
             mask = ~padding_mask.transpose(0, 1).reshape(-1)
+            if mask.numel() == 0 or target.numel() == 0:
+                loss = pred.sum() * 0.0
+                sample_size = 0
+                logging_output = {"loss": 0.0, "sample_size": 0}
+                return loss, sample_size, logging_output
             pred = pred[mask]
             target = target[mask]
+            if target.numel() == 0:
+                loss = pred.sum() * 0.0
+                sample_size = 0
+                logging_output = {"loss": 0.0, "sample_size": 0}
+                return loss, sample_size, logging_output
 
         if self.task.target_dictionary is not None:
             ignore_index = self.task.target_dictionary.pad()
