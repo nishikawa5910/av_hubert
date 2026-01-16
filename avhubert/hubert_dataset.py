@@ -71,6 +71,11 @@ def load_audio_visual(manifest_path, max_keep, min_keep, frame_rate, label_paths
                 inds.append(ind)
                 sizes.append(sz)
     tot = ind + 1
+    if not sizes:
+        raise ValueError(
+            "No samples matched filtering constraints. "
+            "Check max_keep/min_keep and label alignment settings."
+        )
     logger.info(
         (
             f"max_keep={max_keep}, min_keep={min_keep}, "
