@@ -27,6 +27,13 @@ logger = logging.getLogger(__name__)
 class ContentVecDecoder(nn.Module):
     def __init__(self, input_dim: int, cfg) -> None:
         super().__init__()
+        self.output_dim = (
+            cfg.contentvec_num_classes
+            if cfg.contentvec_target_type == "class"
+            else cfg.contentvec_dim
+        )
+        if cfg.contentvec_target_type == "class" and self.output_dim <= 0:
+            raise ValueError("contentvec_num_classes must be > 0 for class targets")
         self.proj_in = (
             Linear(input_dim, cfg.contentvec_decoder_dim, bias=False)
             if input_dim != cfg.contentvec_decoder_dim
@@ -42,7 +49,7 @@ class ContentVecDecoder(nn.Module):
         self.transformer = nn.TransformerEncoder(
             encoder_layer, num_layers=cfg.contentvec_decoder_layers
         )
-        self.proj_out = Linear(cfg.contentvec_decoder_dim, cfg.contentvec_dim)
+        self.proj_out = Linear(cfg.contentvec_decoder_dim, self.output_dim)
 
     def forward(self, x, padding_mask=None):
         if self.proj_in is not None:
@@ -53,6 +60,14 @@ class ContentVecDecoder(nn.Module):
 
 @dataclass
 class AVHubertContentVecConfig(AVHubertAsrConfig):
+    contentvec_target_type: str = field(
+        default="float",
+        metadata={"help": "contentvec target type: float or class"},
+    )
+    contentvec_num_classes: int = field(
+        default=0,
+        metadata={"help": "number of classes for class targets"},
+    )
     contentvec_dim: int = field(
         default=768, metadata={"help": "contentvec feature dimension"}
     )
@@ -107,6 +122,14 @@ class AVHubertContentVecModel(BaseFairseqModel):
 
 @dataclass
 class AVHubertContentVecSeq2SeqConfig(AVHubertSeq2SeqConfig):
+    contentvec_target_type: str = field(
+        default="float",
+        metadata={"help": "contentvec target type: float or class"},
+    )
+    contentvec_num_classes: int = field(
+        default=0,
+        metadata={"help": "number of classes for class targets"},
+    )
     contentvec_dim: int = field(
         default=768, metadata={"help": "contentvec feature dimension"}
     )
@@ -216,8 +239,13 @@ class AVHubertContentVecSeq2Seq(FairseqEncoderDecoderModel):
             if unexpected:
                 logger.warning("Unexpected contentvec decoder keys: %s", unexpected)
 
+        contentvec_dim = (
+            cfg.contentvec_num_classes
+            if cfg.contentvec_target_type == "class"
+            else cfg.contentvec_dim
+        )
         fusion_proj = Linear(
-            encoder_dim + cfg.contentvec_dim,
+            encoder_dim + contentvec_dim,
             cfg.decoder_embed_dim,
         )
         return cls(encoder, decoder, contentvec_decoder, fusion_proj, cfg)
