@@ -84,7 +84,10 @@ class ContentVecCrossEntropyCriterion(FairseqCriterion):
     def forward(self, model, sample, reduce=True):
         net_output = model(**sample["net_input"])
         pred = net_output["pred"]  # T x B x C
-        target = sample["target"]  # B x T
+        if "target" in sample:
+            target = sample["target"]  # B x T
+        else:
+            target = sample["target_list"][0]  # B x T
         target = target.transpose(0, 1)
 
         pred = pred.transpose(0, 1).contiguous().view(-1, pred.size(-1))
