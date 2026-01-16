@@ -234,7 +234,9 @@ class AVHubertPretrainingTask(FairseqTask):
             if label_type == "float":
                 dictionaries.append(None)
             else:
-                dictionaries.append(Dictionary.load(f"{label_dir}/dict.{label}.txt"))
+                dict_path = f"{label_dir}/dict.{label}.txt"
+                logger.info("Loading label dictionary: %s", dict_path)
+                dictionaries.append(Dictionary.load(dict_path))
         return dictionaries
 
     def get_primary_dictionary(self):
