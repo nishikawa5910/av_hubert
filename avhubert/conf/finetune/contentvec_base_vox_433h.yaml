@@ -1,0 +1,88 @@
+# @package _group_
+
+common:
+  fp16: true
+  log_format: json
+  log_interval: 200
+  tensorboard_logdir: tblog
+  seed: 1337
+  user_dir: ???
+
+checkpoint:
+  save_interval: 2
+  keep_interval_updates: 1
+  no_epoch_checkpoints: true
+  best_checkpoint_metric: loss
+  maximize_best_checkpoint_metric: false
+
+distributed_training:
+  ddp_backend: c10d
+  find_unused_parameters: true
+  distributed_world_size: 8
+  distributed_port: 29671
+  nprocs_per_node: 8
+
+task:
+  _name: av_hubert_pretraining
+  is_s2s: false
+  data: ???
+  label_dir: ???
+  normalize: true  # must be consistent with pre-training
+  labels: ["contentvec"]
+  label_types: ["float"]
+  label_rate: 50
+  float_pad_value: 0.0
+  single_target: true
+  fine_tuning: true
+  stack_order_audio: 4
+  max_sample_size: 500
+  modalities: ["video"]
+  image_aug: true
+  pad_audio: true
+  random_crop: false
+
+dataset:
+  num_workers: 6
+  max_tokens: 1000
+  validate_after_updates: 0
+  validate_interval: 2
+  train_subset: train
+  valid_subset: valid
+
+criterion:
+  _name: contentvec_mse
+
+optimization:
+  max_update: 45000
+  lr: [0.001]
+  sentence_avg: true
+  update_freq: [1]
+
+optimizer:
+  _name: adam
+  adam_betas: (0.9,0.98)
+  adam_eps: 1e-08
+
+lr_scheduler:
+  _name: tri_stage
+  warmup_steps: 15000
+  hold_steps: 0
+  decay_steps: 30000
+  final_lr_scale: 0.05
+
+model:
+  _name: av_hubert_contentvec
+  w2v_path: ???
+  skip_w2v_label_dicts: true
+  apply_mask: false
+  mask_selection: static
+  mask_length: 10
+  mask_other: 0
+  mask_channel_length: 10
+  mask_channel_prob: 0.0
+  mask_channel_selection: static
+  mask_channel_other: 0
+  no_mask_overlap: false
+  no_mask_channel_overlap: false
+  feature_grad_mult: 1.0
+  freeze_finetune_updates: 999999
