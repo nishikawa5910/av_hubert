@@ -26,6 +26,8 @@ task:
   _name: av_hubert_pretraining
   is_s2s: true
   data: ???
+  # label_dir must include dict.wrd.txt and dict.km.txt
+  # (label_dir/dict.<label>.txt is loaded for each label)
   label_dir: ???
   tokenizer_bpe_model: ???
   normalize: true  # must be consistent with pre-training

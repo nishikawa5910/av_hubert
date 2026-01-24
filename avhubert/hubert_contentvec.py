@@ -243,6 +243,10 @@ class AVHubertContentVecSeq2Seq(FairseqEncoderDecoderModel):
                 for key, value in cv_model_state.items()
                 if key.startswith("decoder.")
             }
+            expected_keys = set(contentvec_decoder.state_dict().keys())
+            decoder_state = {
+                key: value for key, value in decoder_state.items() if key in expected_keys
+            }
             missing, unexpected = contentvec_decoder.load_state_dict(decoder_state, strict=False)
             if missing:
                 logger.warning("Missing contentvec decoder keys: %s", missing)

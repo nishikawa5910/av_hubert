@@ -7,6 +7,8 @@ set -euo pipefail
 
 data_path="/path/to/data"
 label_dir="/path/to/labels"
+# Ensure label_dir contains dict.wrd.txt and dict.km.txt
+# (label_dir/dict.<label>.txt is loaded for each label)
 spm_model="/path/to/wiki-ja.model"
 pretrained_w2v="/path/to/avhubert_pretrained.pt"
 contentvec_decoder="/path/to/contentvec_decoder_km500.pt"
