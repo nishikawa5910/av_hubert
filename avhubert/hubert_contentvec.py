@@ -274,7 +274,28 @@ class AVHubertContentVecSeq2Seq(FairseqEncoderDecoderModel):
             "encoder_out": fused,
             "encoder_padding_mask": padding_mask,
         }
-        return self.decoder(
+        decoder_out = self.decoder(
             prev_output_tokens=kwargs["prev_output_tokens"],
             encoder_out=fused_out,
         )
+        if isinstance(decoder_out, tuple):
+            if len(decoder_out) > 1 and isinstance(decoder_out[1], dict):
+                decoder_out[1]["contentvec_pred"] = contentvec_pred
+                decoder_out[1]["contentvec_padding_mask"] = padding_mask
+            else:
+                decoder_out = (
+                    decoder_out[0],
+                    {
+                        "contentvec_pred": contentvec_pred,
+                        "contentvec_padding_mask": padding_mask,
+                    },
+                )
+        else:
+            decoder_out = (
+                decoder_out,
+                {
+                    "contentvec_pred": contentvec_pred,
+                    "contentvec_padding_mask": padding_mask,
+                },
+            )
+        return decoder_out
