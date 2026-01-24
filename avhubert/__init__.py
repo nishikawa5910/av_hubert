@@ -11,3 +11,4 @@ from .hubert_pretraining import *
 from .hubert_criterion import *
 from .audio_aux_criterion import *
 from .contentvec_criterion import *
+from .contentvec_seq2seq_criterion import *
