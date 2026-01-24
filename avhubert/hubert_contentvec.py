@@ -226,7 +226,17 @@ class AVHubertContentVecSeq2Seq(FairseqEncoderDecoderModel):
         encoder_dim = encoder.w2v_model.encoder_embed_dim
         contentvec_decoder = ContentVecDecoder(encoder_dim, cfg)
         if cfg.contentvec_decoder_path is not None:
-            cv_state = checkpoint_utils.load_checkpoint_to_cpu(cfg.contentvec_decoder_path)
+            try:
+                cv_state = checkpoint_utils.load_checkpoint_to_cpu(
+                    cfg.contentvec_decoder_path
+                )
+            except KeyError as exc:
+                logger.warning(
+                    "Failed to load contentvec decoder checkpoint with fairseq loader (%s). "
+                    "Falling back to torch.load.",
+                    exc,
+                )
+                cv_state = torch.load(cfg.contentvec_decoder_path, map_location="cpu")
             cv_model_state = cv_state.get("model", {})
             decoder_state = {
                 key.replace("decoder.", ""): value
