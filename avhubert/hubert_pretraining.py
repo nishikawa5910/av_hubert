@@ -279,6 +279,26 @@ class AVHubertPretrainingTask(FairseqTask):
             label_types = ["class" for _ in self.cfg.labels]
         if len(label_types) == 1 and len(self.cfg.labels) > 1:
             label_types = label_types * len(self.cfg.labels)
+        needs_reload = len(dictionaries) < len(self.cfg.labels)
+        if not needs_reload:
+            for idx, label_type in enumerate(label_types):
+                if label_type == "float":
+                    continue
+                dictionary = dictionaries[idx] if idx < len(dictionaries) else None
+                if dictionary is None:
+                    needs_reload = True
+                    break
+        if needs_reload:
+            logger.warning(
+                "Reloading dictionaries (labels=%s, label_types=%s).",
+                self.cfg.labels,
+                label_types,
+            )
+            dictionaries = self.load_dictionaries()
+            try:
+                self.state.dictionaries = dictionaries
+            except AttributeError:
+                logger.warning("Failed to update cached dictionaries state.")
         pad_list = []
         eos_list = []
         for idx, label_type in enumerate(label_types):
